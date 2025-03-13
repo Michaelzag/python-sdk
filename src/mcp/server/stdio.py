@@ -24,9 +24,15 @@ from io import TextIOWrapper
 
 import anyio
 import anyio.lowlevel
-from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 import mcp.types as types
+from mcp.shared.session import (
+    ReadStream,
+    ReadStreamWriter,
+    WriteStream,
+    WriteStreamReader,
+)
+from mcp.types import MessageFrame
 
 
 @asynccontextmanager
@@ -47,11 +53,11 @@ async def stdio_server(
     if not stdout:
         stdout = anyio.wrap_file(TextIOWrapper(sys.stdout.buffer, encoding="utf-8"))
 
-    read_stream: MemoryObjectReceiveStream[types.JSONRPCMessage | Exception]
-    read_stream_writer: MemoryObjectSendStream[types.JSONRPCMessage | Exception]
+    read_stream: ReadStream
+    read_stream_writer: ReadStreamWriter
 
-    write_stream: MemoryObjectSendStream[types.JSONRPCMessage]
-    write_stream_reader: MemoryObjectReceiveStream[types.JSONRPCMessage]
+    write_stream: WriteStream
+    write_stream_reader: WriteStreamReader
 
     read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
     write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
@@ -66,7 +72,9 @@ async def stdio_server(
                         await read_stream_writer.send(exc)
                         continue
 
-                    await read_stream_writer.send(message)
+                    await read_stream_writer.send(
+                        MessageFrame(message=message, raw=line)
+                    )
         except anyio.ClosedResourceError:
             await anyio.lowlevel.checkpoint()
 
@@ -74,6 +82,7 @@ async def stdio_server(
         try:
             async with write_stream_reader:
                 async for message in write_stream_reader:
+                    # Extract the inner JSONRPCRequest/JSONRPCResponse from MessageFrame
                     json = message.model_dump_json(by_alias=True, exclude_none=True)
                     await stdout.write(json + "\n")
                     await stdout.flush()

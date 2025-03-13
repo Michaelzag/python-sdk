@@ -1,3 +1,5 @@
+from types import NoneType
+
 import anyio
 import pytest
 
@@ -11,9 +13,9 @@ from mcp.types import (
     InitializeRequest,
     InitializeResult,
     JSONRPCMessage,
-    JSONRPCNotification,
     JSONRPCRequest,
     JSONRPCResponse,
+    MessageFrame,
     ServerCapabilities,
     ServerResult,
 )
@@ -22,10 +24,10 @@ from mcp.types import (
 @pytest.mark.anyio
 async def test_client_session_initialize():
     client_to_server_send, client_to_server_receive = anyio.create_memory_object_stream[
-        JSONRPCMessage
+        MessageFrame[NoneType]
     ](1)
     server_to_client_send, server_to_client_receive = anyio.create_memory_object_stream[
-        JSONRPCMessage
+        MessageFrame[NoneType]
     ](1)
 
     initialized_notification = None
@@ -34,7 +36,7 @@ async def test_client_session_initialize():
         nonlocal initialized_notification
 
         jsonrpc_request = await client_to_server_receive.receive()
-        assert isinstance(jsonrpc_request.root, JSONRPCRequest)
+        assert isinstance(jsonrpc_request, MessageFrame)
         request = ClientRequest.model_validate(
             jsonrpc_request.model_dump(by_alias=True, mode="json", exclude_none=True)
         )
@@ -56,21 +58,25 @@ async def test_client_session_initialize():
         )
 
         async with server_to_client_send:
+            assert isinstance(jsonrpc_request.message.root, JSONRPCRequest)
             await server_to_client_send.send(
-                JSONRPCMessage(
-                    JSONRPCResponse(
-                        jsonrpc="2.0",
-                        id=jsonrpc_request.root.id,
-                        result=result.model_dump(
-                            by_alias=True, mode="json", exclude_none=True
-                        ),
-                    )
+                MessageFrame(
+                    message=JSONRPCMessage(
+                        JSONRPCResponse(
+                            jsonrpc="2.0",
+                            id=jsonrpc_request.message.root.id,
+                            result=result.model_dump(
+                                by_alias=True, mode="json", exclude_none=True
+                            ),
+                        )
+                    ),
+                    raw=None,
                 )
             )
             jsonrpc_notification = await client_to_server_receive.receive()
-            assert isinstance(jsonrpc_notification.root, JSONRPCNotification)
+            assert isinstance(jsonrpc_notification.message, JSONRPCMessage)
             initialized_notification = ClientNotification.model_validate(
-                jsonrpc_notification.model_dump(
+                jsonrpc_notification.message.model_dump(
                     by_alias=True, mode="json", exclude_none=True
                 )
             )
